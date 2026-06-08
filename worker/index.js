@@ -7,7 +7,8 @@
 //   GET  /api/session/new            -> { code }            (mint a fresh code)
 //   GET  /api/session/:code/ws       -> WebSocket           (page subscribes; gets snapshot + live updates)
 //   POST /api/session/:code/step     -> { ok, steps }       (Claude posts {step, done}; broadcast to subscribers)
-//   GET  /api/session/:code/state    -> { steps }           (plain poll fallback)
+//   POST /api/session/:code/status   -> { ok, services }    (Claude posts {service,state,detail,url}; broadcast)
+//   GET  /api/session/:code/state    -> { steps, services } (plain poll fallback)
 //
 // State lives in one SQLite-backed Durable Object per code — the right primitive
 // for "one live coordinator per visitor". Free-plan friendly.
@@ -37,7 +38,7 @@ export default {
       return Response.json({ code: makeCode() }, { headers: { "cache-control": "no-store" } });
     }
 
-    const m = url.pathname.match(/^\/api\/session\/([A-Za-z0-9-]+)\/(ws|step|state)$/);
+    const m = url.pathname.match(/^\/api\/session\/([A-Za-z0-9-]+)\/(ws|step|state|status)$/);
     if (m) {
       const code = m[1].toUpperCase();
       const id = env.SESSIONS.idFromName(code);
@@ -58,11 +59,20 @@ export class SessionRoom {
     this.state = state;
     this.sql = state.storage.sql;
     this.sql.exec(`CREATE TABLE IF NOT EXISTS steps (id TEXT PRIMARY KEY, done INTEGER NOT NULL)`);
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS services (id TEXT PRIMARY KEY, state TEXT, detail TEXT, url TEXT)`);
   }
 
   snapshot() {
     const out = {};
     for (const row of this.sql.exec(`SELECT id, done FROM steps`)) out[row.id] = !!row.done;
+    return out;
+  }
+
+  servicesSnapshot() {
+    const out = {};
+    for (const row of this.sql.exec(`SELECT id, state, detail, url FROM services`)) {
+      out[row.id] = { state: row.state, detail: row.detail, url: row.url };
+    }
     return out;
   }
 
@@ -80,7 +90,7 @@ export class SessionRoom {
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
       this.state.acceptWebSocket(server);          // hibernation API
-      server.send(JSON.stringify({ type: "snapshot", steps: this.snapshot() }));
+      server.send(JSON.stringify({ type: "snapshot", steps: this.snapshot(), services: this.servicesSnapshot() }));
       return new Response(null, { status: 101, webSocket: client });
     }
 
@@ -98,8 +108,28 @@ export class SessionRoom {
       return Response.json({ ok: true, step, done: !!done, steps: this.snapshot() });
     }
 
+    if (url.pathname.endsWith("/status") && request.method === "POST") {
+      let body;
+      try { body = await request.json(); } catch { return Response.json({ ok: false, error: "bad json" }, { status: 400 }); }
+      const service = String(body.service || body.id || "").trim();
+      if (!service) return Response.json({ ok: false, error: "missing service" }, { status: 400 });
+      const stateVal = String(body.state || "unknown");
+      const detail = body.detail == null ? null : String(body.detail);
+      const link = body.url == null ? null : String(body.url);
+      this.sql.exec(
+        `INSERT INTO services (id, state, detail, url) VALUES (?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET state = ?, detail = ?, url = ?`,
+        service, stateVal, detail, link, stateVal, detail, link,
+      );
+      this.broadcast({ type: "status", service, state: stateVal, detail, url: link });
+      return Response.json({ ok: true, service, services: this.servicesSnapshot() });
+    }
+
     if (url.pathname.endsWith("/state")) {
-      return Response.json({ steps: this.snapshot() }, { headers: { "cache-control": "no-store" } });
+      return Response.json(
+        { steps: this.snapshot(), services: this.servicesSnapshot() },
+        { headers: { "cache-control": "no-store" } },
+      );
     }
 
     return new Response("not found", { status: 404 });
