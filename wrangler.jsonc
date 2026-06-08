@@ -1,0 +1,31 @@
+{
+  // Publish Yourself — served as a Worker with static assets + a pairing API.
+  //
+  //   /            -> dist/index.html (the rendered guide)        [static asset]
+  //   /index.md    -> dist/index.md   (the single source of truth) [static asset]
+  //   /api/...     -> worker/index.js (the live pairing API)        [Worker]
+  //
+  // The pairing API keeps one Durable Object per code (e.g. WAVE-7321) so a
+  // visitor's page and a Claude Code session can share live progress.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "web-publishing",
+  "main": "worker/index.js",
+  "compatibility_date": "2025-05-01",
+
+  // Static guide. Requests are matched against these first; anything with no
+  // matching file (i.e. /api/*) falls through to the Worker above.
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS"
+  },
+
+  // One live coordinator per pairing code. SQLite-backed => free-plan friendly.
+  "durable_objects": {
+    "bindings": [
+      { "name": "SESSIONS", "class_name": "SessionRoom" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["SessionRoom"] }
+  ]
+}
