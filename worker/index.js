@@ -8,7 +8,8 @@
 //   GET  /api/session/:code/ws       -> WebSocket           (page subscribes; gets snapshot + live updates)
 //   POST /api/session/:code/step     -> { ok, steps }       (Claude posts {step, done}; broadcast to subscribers)
 //   POST /api/session/:code/status   -> { ok, services }    (Claude posts {service,state,detail,url}; broadcast)
-//   GET  /api/session/:code/state    -> { steps, services } (plain poll fallback)
+//   POST /api/session/:code/log      -> { ok }               (Claude posts {text, level}; appended + broadcast)
+//   GET  /api/session/:code/state    -> { steps, services, logs } (plain poll fallback)
 //
 // State lives in one SQLite-backed Durable Object per code — the right primitive
 // for "one live coordinator per visitor". Free-plan friendly.
@@ -38,7 +39,7 @@ export default {
       return Response.json({ code: makeCode() }, { headers: { "cache-control": "no-store" } });
     }
 
-    const m = url.pathname.match(/^\/api\/session\/([A-Za-z0-9-]+)\/(ws|step|state|status)$/);
+    const m = url.pathname.match(/^\/api\/session\/([A-Za-z0-9-]+)\/(ws|step|state|status|log)$/);
     if (m) {
       const code = m[1].toUpperCase();
       const id = env.SESSIONS.idFromName(code);
@@ -60,6 +61,9 @@ export class SessionRoom {
     this.sql = state.storage.sql;
     this.sql.exec(`CREATE TABLE IF NOT EXISTS steps (id TEXT PRIMARY KEY, done INTEGER NOT NULL)`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS services (id TEXT PRIMARY KEY, state TEXT, detail TEXT, url TEXT)`);
+    // additive migration: existing session DOs already have `services` without `extra`
+    try { this.sql.exec(`ALTER TABLE services ADD COLUMN extra TEXT`); } catch { /* column already present */ }
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS logs (seq INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, text TEXT, level TEXT)`);
   }
 
   snapshot() {
@@ -70,10 +74,17 @@ export class SessionRoom {
 
   servicesSnapshot() {
     const out = {};
-    for (const row of this.sql.exec(`SELECT id, state, detail, url FROM services`)) {
-      out[row.id] = { state: row.state, detail: row.detail, url: row.url };
+    for (const row of this.sql.exec(`SELECT id, state, detail, url, extra FROM services`)) {
+      const o = { state: row.state, detail: row.detail, url: row.url };
+      if (row.extra) { try { o.extra = JSON.parse(row.extra); } catch {} }
+      out[row.id] = o;
     }
     return out;
+  }
+
+  logsSnapshot() {
+    const rows = [...this.sql.exec(`SELECT ts, text, level FROM logs ORDER BY seq DESC LIMIT 60`)];
+    return rows.reverse().map(r => ({ ts: r.ts, text: r.text, level: r.level }));
   }
 
   broadcast(obj) {
@@ -90,7 +101,7 @@ export class SessionRoom {
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
       this.state.acceptWebSocket(server);          // hibernation API
-      server.send(JSON.stringify({ type: "snapshot", steps: this.snapshot(), services: this.servicesSnapshot() }));
+      server.send(JSON.stringify({ type: "snapshot", steps: this.snapshot(), services: this.servicesSnapshot(), logs: this.logsSnapshot() }));
       return new Response(null, { status: 101, webSocket: client });
     }
 
@@ -116,18 +127,34 @@ export class SessionRoom {
       const stateVal = String(body.state || "unknown");
       const detail = body.detail == null ? null : String(body.detail);
       const link = body.url == null ? null : String(body.url);
+      // `extra` carries structured per-service data (e.g. Cloudflare's IdP tick-list)
+      const extra = body.extra == null ? null : JSON.stringify(body.extra);
       this.sql.exec(
-        `INSERT INTO services (id, state, detail, url) VALUES (?, ?, ?, ?)
-           ON CONFLICT(id) DO UPDATE SET state = ?, detail = ?, url = ?`,
-        service, stateVal, detail, link, stateVal, detail, link,
+        `INSERT INTO services (id, state, detail, url, extra) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET state = ?, detail = ?, url = ?, extra = ?`,
+        service, stateVal, detail, link, extra, stateVal, detail, link, extra,
       );
-      this.broadcast({ type: "status", service, state: stateVal, detail, url: link });
+      this.broadcast({ type: "status", service, state: stateVal, detail, url: link, extra: body.extra ?? null });
       return Response.json({ ok: true, service, services: this.servicesSnapshot() });
+    }
+
+    if (url.pathname.endsWith("/log") && request.method === "POST") {
+      let body;
+      try { body = await request.json(); } catch { return Response.json({ ok: false, error: "bad json" }, { status: 400 }); }
+      const text = String(body.text || "").trim();
+      if (!text) return Response.json({ ok: false, error: "missing text" }, { status: 400 });
+      const level = String(body.level || "info");
+      const ts = Date.now();
+      this.sql.exec(`INSERT INTO logs (ts, text, level) VALUES (?, ?, ?)`, ts, text, level);
+      // keep only the most recent ~200 lines
+      this.sql.exec(`DELETE FROM logs WHERE seq <= (SELECT MAX(seq) FROM logs) - 200`);
+      this.broadcast({ type: "log", ts, text, level });
+      return Response.json({ ok: true });
     }
 
     if (url.pathname.endsWith("/state")) {
       return Response.json(
-        { steps: this.snapshot(), services: this.servicesSnapshot() },
+        { steps: this.snapshot(), services: this.servicesSnapshot(), logs: this.logsSnapshot() },
         { headers: { "cache-control": "no-store" } },
       );
     }
