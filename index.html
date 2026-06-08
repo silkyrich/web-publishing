@@ -203,7 +203,8 @@
   // ---- Interactive, persisted checkboxes (the graceful-fallback the guide promises) ----
   const KEY = "publish-yourself-progress";
   const saved = JSON.parse(localStorage.getItem(KEY) || "{}");
-  const boxes = [...document.querySelectorAll(".task-list-item input[type=checkbox]")];
+  const boxes = [...document.querySelectorAll("#content li > input[type=checkbox]")];
+  boxes.forEach(b => b.closest("li").classList.add("task-list-item"));
   boxes.forEach((box, i) => {
     const id = "step-" + i;                 // stable by document order
     box.disabled = false;
