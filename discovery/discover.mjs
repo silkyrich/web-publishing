@@ -108,6 +108,7 @@ async function validate(tool) {
   if (v.kind === "http-bearer" || v.kind === "http-key" || v.kind === "http-bearer-header") {
     const cands = getKeys(v);
     if (!cands.length) return fail0("No API key found.");
+    const want = v.ok && v.ok !== "200" ? v.ok : null;   // a real substring requirement, not just 200
     let lastStatus = 0;
     for (const c of cands) {
       let url = v.url, headers = {};
@@ -115,7 +116,7 @@ async function validate(tool) {
       else if (v.kind === "http-bearer-header") headers = { [v.header]: c.key };
       else url = v.url.replace("{KEY}", encodeURIComponent(c.key));
       const r = await httpGet(url, headers);
-      if (r.ok || (v.ok && r.text.includes(v.ok))) return ok2(`Validated — live check passed (key from ${c.source}).`);
+      if (want ? (r.ok && r.text.includes(want)) : r.ok) return ok2(`Validated — live check passed (key from ${c.source}).`);
       lastStatus = r.status;
     }
     return warn1(`${cands.length} key(s) present but rejected (HTTP ${lastStatus}) — needs a fresh key.`);

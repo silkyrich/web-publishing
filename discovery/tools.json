@@ -9,8 +9,7 @@
   "types": {
     "connector": "Account-level OAuth (claude.ai connector). Authorize once at claude.ai/customize/connectors; no local install; follows the account.",
     "local-mcp": "Local MCP server (stdio) installed on this machine; reads an API key from env/.env; needs per-tool permission.",
-    "cli": "Standalone CLI tool authenticated in its own config (gh, wrangler).",
-    "manual": "Web tool with no API — link only."
+    "cli": "Standalone CLI tool authenticated in its own config (gh, wrangler)."
   },
   "categories": [
     {
@@ -109,11 +108,11 @@
           }
         },
         {
-          "id": "google-musicfx", "name": "Google MusicFX", "slug": "googlegemini", "url": "https://labs.google/fx/tools/music-fx",
-          "type": "manual",
-          "desc": "Google's MusicFX (Labs) generates royalty-free background music and soundscapes from a text prompt.",
-          "setup": { "how": "No API — open it in Google Labs and generate by hand.", "link": "https://labs.google/fx/tools/music-fx" },
-          "validate": { "kind": "manual" }
+          "id": "google-musicfx", "name": "Google Lyria · MusicFX", "slug": "googlegemini", "url": "https://aistudio.google.com",
+          "type": "local-mcp",
+          "desc": "Google's Lyria music models (the engine behind MusicFX) generate royalty-free music and soundscapes from a text prompt — via the Google AI API (models/lyria-3-*).",
+          "setup": { "how": "Use a Google AI key (GEMINI_API_KEY) with Lyria access; call a models/lyria-3-* model.", "link": "https://aistudio.google.com/app/apikey" },
+          "validate": { "kind": "http-key", "url": "https://generativelanguage.googleapis.com/v1beta/models?key={KEY}", "keyVar": "GEMINI_API_KEY", "ok": "lyria" }
         }
       ]
     }
