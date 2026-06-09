@@ -16,12 +16,14 @@ import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
-const CODE = process.argv[2];
 const DRY = process.argv.includes("--dry");
+const positional = process.argv.slice(2).filter(a => !a.startsWith("--"));
+const CODE = positional[0];
+const TOKEN = positional[1] || process.env.PAIR_TOKEN || "";   // write-token for locked rooms
 const BASE = process.env.BASE || "https://web-publishing.silkyrich.workers.dev";
 
-if (!CODE || CODE.startsWith("--")) {
-  console.error("usage: node discovery/discover.mjs <PAIRING-CODE> [--dry]");
+if (!CODE) {
+  console.error("usage: node discovery/discover.mjs <PAIRING-CODE> [WRITE-TOKEN] [--dry]");
   process.exit(1);
 }
 
@@ -76,7 +78,9 @@ function cli(cmd) {
 // ---- POST helpers (the pairing channel) ----
 async function post(kind, body) {
   if (DRY) return;
-  try { await fetch(`${BASE}/api/session/${CODE}/${kind}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); }
+  const headers = { "content-type": "application/json" };
+  if (TOKEN) headers["x-pair-token"] = TOKEN;
+  try { await fetch(`${BASE}/api/session/${CODE}/${kind}`, { method: "POST", headers, body: JSON.stringify(body) }); }
   catch { /* offline; keep going */ }
 }
 const log = (text, level = "info") => { console.log(`[${level}] ${text}`); return post("log", { text, level }); };

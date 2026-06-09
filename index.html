@@ -359,12 +359,13 @@
   // ---- live pairing: one channel carrying status, IdP ticks, and the activity log ----
   const pairEl = document.getElementById("pair");
   let code = localStorage.getItem("publish-yourself-code") || null;
+  let token = localStorage.getItem("publish-yourself-token") || null;
 
-  function showPairing(c){
+  function showPairing(c, tok){
     pairEl.hidden = false;
     pairEl.querySelector(".code").textContent = c;
     pairEl.querySelector(".line").textContent =
-      `My pairing code is ${c} — read https://${location.host}/ , run discovery, and POST status + logs to https://${location.host}/api/session/${c}/`;
+      `My pairing code is ${c} and my write-token is ${tok || "(none)"}. Run: node discovery/discover.mjs ${c} ${tok || ""}`.trim();
   }
   function setLive(on){
     pairEl.classList.toggle("live", on);
@@ -390,11 +391,16 @@
 
   try {
     bar.classList.add("loading");
-    if (!code){
+    if (!code || !token){
       const r = await fetch("/api/session/new", { cache:"no-store" });
-      if (r.ok){ code = (await r.json()).code; localStorage.setItem("publish-yourself-code", code); }
+      if (r.ok){
+        const j = await r.json();
+        code = j.code; token = j.token || "";
+        localStorage.setItem("publish-yourself-code", code);
+        localStorage.setItem("publish-yourself-token", token);
+      }
     }
-    if (code){ showPairing(code); connect(); }
+    if (code){ showPairing(code, token); connect(); }
     else bar.classList.remove("loading");
   } catch { bar.classList.remove("loading"); }
 </script>

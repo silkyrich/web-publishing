@@ -31,12 +31,32 @@ function makeCode() {
   return `${word}-${num}`;
 }
 
+// High-entropy secret that authorizes WRITES to a room (status/log). The friendly
+// code names the room; this token is the capability. ~10^29 space — not brute-forceable.
+function makeToken() {
+  const b = new Uint8Array(18);
+  crypto.getRandomValues(b);
+  return [...b].map(x => x.toString(16).padStart(2, "0")).join("");
+}
+
+// Identity injected by Cloudflare Access once the page is behind SSO (empty otherwise).
+function accessEmail(request) {
+  return request.headers.get("cf-access-authenticated-user-email") || "";
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/session/new") {
-      return Response.json({ code: makeCode() }, { headers: { "cache-control": "no-store" } });
+      const code = makeCode();
+      const token = makeToken();
+      const id = env.SESSIONS.idFromName(code);
+      await env.SESSIONS.get(id).fetch(new Request("https://do/register", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token, owner: accessEmail(request) }),
+      }));
+      return Response.json({ code, token }, { headers: { "cache-control": "no-store" } });
     }
 
     const m = url.pathname.match(/^\/api\/session\/([A-Za-z0-9-]+)\/(ws|step|state|status|log)$/);
@@ -111,9 +131,27 @@ export class SessionRoom {
     this.broadcast({ type: "cleared", reason: "weekly" });
   }
 
+  // Writes (status/log) require the room's token once one is set. Rooms created
+  // before tokens existed have none → still open (backward compatible).
+  async writeAllowed(request) {
+    const tok = await this.state.storage.get("token");
+    if (!tok) return true;
+    return request.headers.get("x-pair-token") === tok;
+  }
+
   async fetch(request) {
     const url = new URL(request.url);
     await this.ensureLifecycle();
+
+    // Bind the room's write-token + owner on creation (first registration wins).
+    if (url.pathname.endsWith("/register") && request.method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      if (!(await this.state.storage.get("token"))) {
+        if (b.token) await this.state.storage.put("token", b.token);
+        if (b.owner) await this.state.storage.put("owner", b.owner);
+      }
+      return Response.json({ ok: true });
+    }
 
     if (url.pathname.endsWith("/ws")) {
       const pair = new WebSocketPair();
@@ -138,6 +176,7 @@ export class SessionRoom {
     }
 
     if (url.pathname.endsWith("/status") && request.method === "POST") {
+      if (!(await this.writeAllowed(request))) return Response.json({ ok: false, error: "bad or missing token" }, { status: 403 });
       let body;
       try { body = await request.json(); } catch { return Response.json({ ok: false, error: "bad json" }, { status: 400 }); }
       const service = String(body.service || body.id || "").trim();
@@ -157,6 +196,7 @@ export class SessionRoom {
     }
 
     if (url.pathname.endsWith("/log") && request.method === "POST") {
+      if (!(await this.writeAllowed(request))) return Response.json({ ok: false, error: "bad or missing token" }, { status: 403 });
       let body;
       try { body = await request.json(); } catch { return Response.json({ ok: false, error: "bad json" }, { status: 400 }); }
       const text = String(body.text || "").trim();
