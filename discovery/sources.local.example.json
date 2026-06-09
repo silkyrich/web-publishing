@@ -1,0 +1,7 @@
+{
+  "_comment": "Copy to sources.local.json (gitignored) and fill in. Maps an API-key NAME to the .env file on YOUR machine that currently holds it, so discover.mjs can validate keys that aren't exported into your shell. Prefer just exporting the keys into your environment; this file is a bridge for the scattered-.env reality.",
+  "CLOUDFLARE_API_TOKEN": "~/path/to/cloudflare/.env",
+  "GEMINI_API_KEY": "~/path/to/image-mcp/.env",
+  "OPENAI_API_KEY": "~/path/to/image-mcp/.env",
+  "ELEVENLABS_API_KEY": "~/path/to/.env"
+}

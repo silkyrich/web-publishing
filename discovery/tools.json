@@ -1,0 +1,121 @@
+{
+  "$comment": "Single source of truth for the dashboard tiles AND discover.mjs. Each tool declares its integration TYPE (how a person sets it up) and a VALIDATE spec (how Claude earns a confidence level 0-3). No secrets and no machine paths here; keys are referenced by NAME only. discover.mjs reads each keyVar from process.env, or from a gitignored discovery/sources.local.json that maps a key name to the .env file currently holding it (the spit-and-glue we're cleaning up). North star: centralise keys so sources.local.json isn't needed.",
+  "levels": {
+    "0": "Not set up",
+    "1": "Connected, unverified",
+    "2": "Validated by a live check",
+    "3": "Integrated into the build loop"
+  },
+  "types": {
+    "connector": "Account-level OAuth (claude.ai connector). Authorize once at claude.ai/customize/connectors; no local install; follows the account.",
+    "local-mcp": "Local MCP server (stdio) installed on this machine; reads an API key from env/.env; needs per-tool permission.",
+    "cli": "Standalone CLI tool authenticated in its own config (gh, wrangler).",
+    "manual": "Web tool with no API — link only."
+  },
+  "categories": [
+    {
+      "id": "build", "title": "Build & ship your site",
+      "blurb": "The loop: your words → a private vault → live on the web → feedback → the next version.",
+      "tools": [
+        {
+          "id": "github", "name": "GitHub", "slug": "github", "url": "https://github.com",
+          "type": "cli",
+          "desc": "The Vault. Every version of your site kept private — your time machine and your undo button.",
+          "setup": { "how": "Install GitHub CLI and run `gh auth login`.", "link": "https://github.com" },
+          "validate": { "kind": "cli", "run": "gh auth status", "ok": "Logged in" }
+        },
+        {
+          "id": "cloudflare", "name": "Cloudflare", "slug": "cloudflare", "url": "https://dash.cloudflare.com",
+          "type": "cli",
+          "desc": "The Publisher & doorman. Puts your site online, guards it with logins, and can sell you a web address.",
+          "setup": { "how": "Run `wrangler login`, or set CLOUDFLARE_API_TOKEN to a valid token.", "link": "https://dash.cloudflare.com/profile/api-tokens" },
+          "validate": {
+            "kind": "http-bearer", "url": "https://api.cloudflare.com/client/v4/user/tokens/verify",
+            "keyVar": "CLOUDFLARE_API_TOKEN",
+            "ok": "\"status\":\"active\""
+          },
+          "extra": {
+            "idpSource": {
+              "kind": "http-bearer",
+              "url": "https://api.cloudflare.com/client/v4/accounts/{account}/access/identity_providers",
+              "keyVar": "CLOUDFLARE_API_TOKEN"
+            },
+            "idpMenu": ["One-time PIN (email)", "Google", "Microsoft Entra ID", "GitHub", "LinkedIn", "Facebook", "Apple"]
+          }
+        },
+        {
+          "id": "linear", "name": "Linear", "slug": "linear", "url": "https://linear.app",
+          "type": "connector",
+          "desc": "The Inbox. The feedback button on your site files tickets here; Claude reads them and ships the fixes.",
+          "setup": { "how": "Authorize the Linear connector at claude.ai/customize/connectors.", "link": "https://claude.ai/customize/connectors" },
+          "validate": { "kind": "mcp", "server": "Linear" }
+        }
+      ]
+    },
+    {
+      "id": "imagegen", "title": "Image generation",
+      "blurb": "Make any picture from words — including believable ones of you.",
+      "tools": [
+        {
+          "id": "openai", "name": "ChatGPT · DALL·E", "slug": "openai", "url": "https://platform.openai.com",
+          "type": "local-mcp",
+          "desc": "OpenAI's image models. Strong at stylised art and following long, detailed prompts — a dependable all-rounder.",
+          "setup": { "how": "Put a valid OPENAI_API_KEY in the image MCP's .env (mcp-universal-images).", "link": "https://platform.openai.com/api-keys" },
+          "validate": {
+            "kind": "http-bearer", "url": "https://api.openai.com/v1/models",
+            "keyVar": "OPENAI_API_KEY",
+            "ok": "200"
+          }
+        },
+        {
+          "id": "gemini-img", "name": "Google Gemini · nano-banana", "slug": "googlegemini", "url": "https://aistudio.google.com",
+          "type": "local-mcp",
+          "desc": "Google's Gemini 2.5 Flash Image (“nano-banana”). Best at keeping a face consistent across scenes and editing by plain instruction — the reason portraits of you look like you. Fast, cheap, blends reference photos cleanly.",
+          "setup": { "how": "Put a valid GEMINI_API_KEY in the image MCP's .env (mcp-universal-images).", "link": "https://aistudio.google.com/app/apikey" },
+          "validate": {
+            "kind": "http-key", "url": "https://generativelanguage.googleapis.com/v1beta/models?key={KEY}",
+            "keyVar": "GEMINI_API_KEY",
+            "ok": "200"
+          }
+        }
+      ]
+    },
+    {
+      "id": "realimg", "title": "Real images",
+      "blurb": "When you want a genuine photograph, not something generated.",
+      "tools": [
+        {
+          "id": "google-img-search", "name": "Google Image Search", "slug": "google", "url": "https://www.google.com/imghp",
+          "type": "local-mcp",
+          "desc": "Pulls real photos from the web's libraries — authentic stock, products, places and reference shots. Use when “real” matters more than “bespoke”.",
+          "setup": { "how": "Install the google-search MCP (`claude mcp add`).", "link": "https://www.google.com/imghp" },
+          "validate": { "kind": "mcp", "server": "google-search" }
+        }
+      ]
+    },
+    {
+      "id": "sound", "title": "Sound & music",
+      "blurb": "Give the site a voice and a soundtrack.",
+      "tools": [
+        {
+          "id": "elevenlabs", "name": "ElevenLabs", "slug": "elevenlabs", "url": "https://elevenlabs.io",
+          "type": "local-mcp",
+          "desc": "Lifelike AI voices and narration — turn text into natural speech for intros, walkthroughs and accessibility.",
+          "setup": { "how": "Get an ElevenLabs API key, set ELEVENLABS_API_KEY, install the ElevenLabs MCP.", "link": "https://elevenlabs.io/app/settings/api-keys" },
+          "validate": {
+            "kind": "http-bearer-header", "url": "https://api.elevenlabs.io/v1/user",
+            "header": "xi-api-key", "keyVar": "ELEVENLABS_API_KEY",
+            "ok": "200"
+          }
+        },
+        {
+          "id": "google-musicfx", "name": "Google MusicFX", "slug": "googlegemini", "url": "https://labs.google/fx/tools/music-fx",
+          "type": "manual",
+          "desc": "Google's MusicFX (Labs) generates royalty-free background music and soundscapes from a text prompt.",
+          "setup": { "how": "No API — open it in Google Labs and generate by hand.", "link": "https://labs.google/fx/tools/music-fx" },
+          "validate": { "kind": "manual" }
+        }
+      ]
+    }
+  ]
+}
