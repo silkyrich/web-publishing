@@ -94,8 +94,26 @@ export class SessionRoom {
     }
   }
 
+  // Arm a weekly clear-down the first time a room is used (and re-arm after each clear).
+  async ensureLifecycle() {
+    if ((await this.state.storage.getAlarm()) == null) {
+      if (!(await this.state.storage.get("createdAt"))) await this.state.storage.put("createdAt", Date.now());
+      await this.state.storage.setAlarm(Date.now() + 7 * 24 * 60 * 60 * 1000);   // +7 days
+    }
+  }
+
+  // Fires ~weekly: wipe the session's state so nothing lingers. Owner binding (if any) is kept.
+  async alarm() {
+    this.sql.exec(`DELETE FROM steps`);
+    this.sql.exec(`DELETE FROM services`);
+    this.sql.exec(`DELETE FROM logs`);
+    await this.state.storage.delete("createdAt");
+    this.broadcast({ type: "cleared", reason: "weekly" });
+  }
+
   async fetch(request) {
     const url = new URL(request.url);
+    await this.ensureLifecycle();
 
     if (url.pathname.endsWith("/ws")) {
       const pair = new WebSocketPair();

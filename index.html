@@ -343,6 +343,19 @@
     logLines.scrollTop = logLines.scrollHeight;
   }
 
+  // Weekly clear-down: the Durable Object wiped this room — reset the board to grey.
+  function resetBoard(){
+    for (const c of cards.values()){
+      c.el.dataset.state = "unknown";
+      c.el.querySelector(".label").textContent = LABEL.unknown;
+      c.el.querySelector(".detail").textContent = "";
+      c.el.querySelectorAll(".level .pip").forEach(p => p.classList.remove("on"));
+    }
+    logLines.innerHTML = "";
+    appendLog({ text: "Weekly clear-down — session reset. Re-run discovery to relight.", level: "info" });
+    recount(); updateProgress();
+  }
+
   // ---- live pairing: one channel carrying status, IdP ticks, and the activity log ----
   const pairEl = document.getElementById("pair");
   let code = localStorage.getItem("publish-yourself-code") || null;
@@ -370,6 +383,7 @@
         updateProgress();
       } else if (m.type === "status"){ applyStatus(m.service, m); }
       else if (m.type === "log"){ appendLog(m); }
+      else if (m.type === "cleared"){ resetBoard(); }
     });
     ws.addEventListener("close", () => { setLive(false); setTimeout(connect, 3000); });
   }
