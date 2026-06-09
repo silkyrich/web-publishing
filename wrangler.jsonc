@@ -12,6 +12,10 @@
   "main": "worker/index.js",
   "compatibility_date": "2025-05-01",
 
+  // Retired the public *.workers.dev URL — the only way in is the locked custom domain
+  // stack.richmorgan.co.uk (Cloudflare Access). Keeps it off across auto-deploys.
+  "workers_dev": false,
+
   // Static guide. Requests are matched against these first; anything with no
   // matching file (i.e. /api/*) falls through to the Worker above.
   "assets": {
